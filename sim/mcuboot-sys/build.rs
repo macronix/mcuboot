@@ -22,6 +22,7 @@ fn main() {
     let enc_ec256 = env::var("CARGO_FEATURE_ENC_EC256").is_ok();
     let bootstrap = env::var("CARGO_FEATURE_BOOTSTRAP").is_ok();
     let multiimage = env::var("CARGO_FEATURE_MULTIIMAGE").is_ok();
+    let downgrade_prevention = env::var("CARGO_FEATURE_DOWNGRADE_PREVENTION").is_ok();
 
     let mut conf = cc::Build::new();
     conf.define("__BOOTSIM__", None);
@@ -31,12 +32,20 @@ fn main() {
     conf.define("MCUBOOT_MAX_IMG_SECTORS", Some("128"));
     conf.define("MCUBOOT_IMAGE_NUMBER", Some(if multiimage { "2" } else { "1" }));
 
+    if downgrade_prevention && !overwrite_only {
+        panic!("Downgrade prevention requires overwrite only");
+    }
+
     if bootstrap {
         conf.define("MCUBOOT_BOOTSTRAP", None);
     }
 
     if validate_primary_slot {
         conf.define("MCUBOOT_VALIDATE_PRIMARY_SLOT", None);
+    }
+
+    if downgrade_prevention {
+        conf.define("MCUBOOT_DOWNGRADE_PREVENTION", None);
     }
 
     // Currently no more than one sig type can be used simultaneously.
@@ -88,16 +97,18 @@ fn main() {
         conf.file("../../ext/mbedtls-asn1/src/asn1parse.c");
     } else if sig_ed25519 {
         conf.define("MCUBOOT_SIGN_ED25519", None);
-        conf.define("MCUBOOT_USE_MBED_TLS", None);
+        conf.define("MCUBOOT_USE_TINYCRYPT", None);
 
-        conf.include("../../ext/mbedtls/include");
-        conf.file("../../ext/mbedtls/library/sha256.c");
-        conf.file("../../ext/mbedtls/library/sha512.c");
+        conf.include("../../ext/tinycrypt/lib/include");
+        conf.include("../../ext/tinycrypt-sha512/lib/include");
+        conf.include("../../ext/mbedtls-asn1/include");
+        conf.file("../../ext/tinycrypt/lib/source/sha256.c");
+        conf.file("../../ext/tinycrypt-sha512/lib/source/sha512.c");
+        conf.file("../../ext/tinycrypt/lib/source/utils.c");
         conf.file("csupport/keys.c");
         conf.file("../../ext/fiat/src/curve25519.c");
-        conf.file("../../ext/mbedtls/library/platform.c");
-        conf.file("../../ext/mbedtls/library/platform_util.c");
-        conf.file("../../ext/mbedtls/library/asn1parse.c");
+        conf.file("../../ext/mbedtls-asn1/src/platform_util.c");
+        conf.file("../../ext/mbedtls-asn1/src/asn1parse.c");
     } else if !enc_ec256 {
         // No signature type, only sha256 validation. The default
         // configuration file bundled with mbedTLS is sufficient.
@@ -212,7 +223,7 @@ fn main() {
     } else if (sig_ecdsa || enc_ec256) && !enc_kw {
         conf.define("MBEDTLS_CONFIG_FILE", Some("<config-asn1.h>"));
     } else if sig_ed25519 {
-        conf.define("MBEDTLS_CONFIG_FILE", Some("<config-ed25519.h>"));
+        conf.define("MBEDTLS_CONFIG_FILE", Some("<config-asn1.h>"));
     } else if enc_kw {
         conf.define("MBEDTLS_CONFIG_FILE", Some("<config-kw.h>"));
     }
